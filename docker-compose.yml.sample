@@ -1,0 +1,47 @@
+version: '3'
+services:
+
+  # .env ファイルに BIND_HOST POSTGRES_VERSION POSTGRES_PASSWORD を指定する
+  # jarファイルと設定ファイルその他は ./appFiles フォルダに置く。appServer.jar config.txt fcm.json
+
+  # BIND_HOST でnginxが起動するまで待つ
+  delay:
+    # ubuntu 18.04未満ではncコマンドがプリインストールされている
+    image: ubuntu:14.04
+    command: >
+      /bin/bash -c "
+        while ! nc -z $BIND_HOST 443;
+        do
+          echo sleeping;
+          sleep 1;
+        done;
+        echo Connected!;
+        sleep 10;
+      "
+
+  # POSTGRES_PASSWORD環境変数をコンテナ内部に渡す (初回のDB初期化の時だけ使われる)
+  db:
+    restart: always
+    image: "postgres:${POSTGRES_VERSION}"
+    environment:
+      - POSTGRES_PASSWORD
+    volumes:
+      - ./pgData:/var/lib/postgresql/data
+    depends_on:
+      - delay
+    ports:
+      - "$BIND_HOST:3938:5432"
+
+  # commandは配列で書くとexecに渡されpid1になりSIGTERMを受け取れる
+  web:
+    restart: always
+    image: openjdk:17
+    volumes:
+      - ./appFiles:/app
+    working_dir: /app
+    command: ["java", "-jar", "appServer.jar", "-c", "config.txt"]
+    depends_on:
+      - db
+    ports:
+      - "$BIND_HOST:3939:3939"
+
