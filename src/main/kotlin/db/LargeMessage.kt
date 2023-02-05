@@ -27,16 +27,8 @@ data class LargeMessage(
         override val primaryKey = PrimaryKey(uuid)
     }
 
-    interface Access {
-        suspend fun create(bytes: ByteArray): String
-
-        suspend fun find(uuid: String): LargeMessage?
-
-        suspend fun deleteOld(expire: Long): Int
-    }
-
-    class AccessImpl : Access {
-        override suspend fun create(bytes: ByteArray) = dbQuery {
+    class Access {
+        suspend fun create(bytes: ByteArray) = dbQuery {
             UUID.randomUUID().toString().also { newUuid ->
                 Meta.insert {
                     it[uuid] = newUuid
@@ -53,12 +45,12 @@ data class LargeMessage(
                 data = this[Meta.data].bytes,
             )
 
-        override suspend fun find(uuid: String) = dbQuery {
+        suspend fun find(uuid: String) = dbQuery {
             Meta.select { Meta.uuid.eq(uuid) }
                 .singleOrNull()?.toLargeMessage()
         }
 
-        override suspend fun deleteOld(expire: Long) = dbQuery {
+        suspend fun deleteOld(expire: Long) = dbQuery {
             Meta.deleteWhere {
                 timeCreate.less(expire)
             }

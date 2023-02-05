@@ -33,27 +33,11 @@ data class Endpoint(
 
         init {
             index(columns = arrayOf(upUrl, fcmToken))
+            index(columns = arrayOf(hashId))
         }
     }
 
-    interface Access {
-        suspend fun find(hashId: String): Endpoint?
-
-        suspend fun delete(
-            upUrl: String?,
-            fcmToken: String?,
-        ): Int
-
-        suspend fun upsert(
-            acctHashList: List<String>,
-            upUrl: String?,
-            fcmToken: String?,
-        ): Map<String, String>
-
-        suspend fun deleteIds(oldIds: List<String>): Int
-    }
-
-    class AccessImpl : Access {
+    class Access {
         private fun resultRowToArticle(row: ResultRow) = Endpoint(
             hashId = row[Meta.hashId],
             acctHash = row[Meta.acctHash],
@@ -61,7 +45,7 @@ data class Endpoint(
             fcmToken = row[Meta.fcmToken],
         )
 
-        override suspend fun delete(
+        suspend fun delete(
             upUrl: String?,
             fcmToken: String?,
         ): Int = dbQuery {
@@ -71,7 +55,15 @@ data class Endpoint(
             }
         }
 
-        override suspend fun find(hashId: String): Endpoint? = dbQuery {
+        suspend fun deleteByHashId(
+            hashId: String,
+        ): Int = dbQuery {
+            Meta.deleteWhere {
+                (Meta.hashId eq hashId)
+            }
+        }
+
+        suspend fun find(hashId: String): Endpoint? = dbQuery {
             Meta.select { Meta.hashId eq hashId }
                 .map(::resultRowToArticle)
                 .singleOrNull()
@@ -83,7 +75,7 @@ data class Endpoint(
          * @return map of acctHash to appServerHash
          *
          */
-        override suspend fun upsert(
+        suspend fun upsert(
             acctHashList: List<String>,
             upUrl: String?,
             fcmToken: String?,
@@ -113,7 +105,7 @@ data class Endpoint(
             }
         }
 
-        override suspend fun deleteIds(oldIds: List<String>) = dbQuery {
+        suspend fun deleteIds(oldIds: List<String>) = dbQuery {
             Meta.deleteWhere { hashId.inList(oldIds) }
         }
     }

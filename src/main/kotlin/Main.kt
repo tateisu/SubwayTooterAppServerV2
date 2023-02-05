@@ -171,11 +171,11 @@ fun launchTimerJob() = GlobalScope.launch(Dispatchers.IO) {
 }
 
 suspend fun deleteOldEndpoints() {
-    val usageAccess = EndpointUsage.AccessImpl()
+    val usageAccess = EndpointUsage.Access()
 
     val oldIds = usageAccess.oldIds()
 
-    Endpoint.AccessImpl().deleteIds(oldIds)
+    Endpoint.Access().deleteIds(oldIds)
         .notZero()
         ?.let { log.i("endpointAccess.deleteIds: count=$it") }
 
@@ -186,7 +186,7 @@ suspend fun deleteOldEndpoints() {
 
 suspend fun deleteOldLargeMessage() {
     val expire = System.currentTimeMillis() - TimeUnit.DAYS.toMillis(30)
-    LargeMessage.AccessImpl()
+    LargeMessage.Access()
         .deleteOld(expire)
         .notZero()
         ?.let { log.i("deleteOldLargeMessage: count=$it") }
@@ -210,8 +210,13 @@ fun Application.module() {
                 val query = call.request.queryParameters
                 val upUrl = query["upUrl"]
                 val fcmToken = query["fcmToken"]
-                val dao = Endpoint.AccessImpl()
-                val count = dao.delete(upUrl = upUrl, fcmToken = fcmToken)
+                val hashId = query["hashId"]
+                val dao = Endpoint.Access()
+                val count = when {
+                    !hashId.isNullOrEmpty() -> dao.deleteByHashId(hashId = hashId)
+                    else -> dao.delete(upUrl = upUrl, fcmToken = fcmToken)
+                }
+                log.i("remove count=$count, upUrl=$upUrl, fcmToken=$fcmToken, hashId=$hashId")
                 jsonObjectOf("count" to count)
             }
         }
@@ -232,13 +237,17 @@ fun Application.module() {
                     error("acctHashList is null or empty")
                 }
                 buildJsonObject {
-                    val map = Endpoint.AccessImpl().upsert(
+                    val map = Endpoint.Access().upsert(
                         acctHashList = acctHashList,
                         upUrl = upUrl,
                         fcmToken = fcmToken
                     )
-                    EndpointUsage.AccessImpl().updateUsage(map.values.toSet())
-                    map.entries.forEach { e -> put(e.key, e.value) }
+                    EndpointUsage.Access().updateUsage(map.values.toSet())
+                    map.entries.forEach { e ->
+                        put(e.key, e.value)
+                        // map of acctHash to appServerHash
+                        log.i("ah=>ash ${e.key}=>${e.value}")
+                    }
                 }
             }
         }
@@ -258,7 +267,7 @@ fun Application.module() {
                 val params = call.request.uri.substring(3).parsePath()
                 val appServerHash = params["a"]
                     ?: error("missing json parameter 'a'")
-                val dao = Endpoint.AccessImpl()
+                val dao = Endpoint.Access()
                 val endpoint = dao.find(appServerHash)
                     ?: "missing endpoint for this hash.".gone()
 
@@ -278,17 +287,19 @@ fun Application.module() {
 
                 val longMessage = BinPackMap().apply {
                     put("a", endpoint.acctHash)
-                    put("h", headerMap)
                     put("b", body)
+                    put("c", endpoint.hashId)
+                    put("h", headerMap)
                 }.encodeBinPack()
 
                 suspend fun data(ratio: Float) = when {
                     longMessage.size.toFloat().times(ratio) <= 4000f -> longMessage
                     else -> {
                         // 長いバイトデータはDBに保存してキーを送る
-                        val uuid = LargeMessage.AccessImpl().create(longMessage)
+                        val uuid = LargeMessage.Access().create(longMessage)
                         BinPackMap().apply {
                             put("a", endpoint.acctHash)
+                            put("c", endpoint.hashId)
                             put("l", uuid)
                         }.encodeBinPack()
                     }
@@ -300,14 +311,14 @@ fun Application.module() {
                 when {
                     upUrl != null -> withContext(Dispatchers.IO) {
                         sendUnifiedPush.send(data(1f), upUrl)
-                        EndpointUsage.AccessImpl().updateUsage1(appServerHash)
+                        EndpointUsage.Access().updateUsage1(appServerHash)
                         jsonObjectOf("result" to "sent to UnifiedPush endpoint.")
                     }
 
                     fcmToken != null -> withContext(Dispatchers.IO) {
                         // Base128の変換ロスが14%あるかも
                         sendFcm.send(fcmToken) { putData("d", data(1.142f).encodeBase128()) }
-                        EndpointUsage.AccessImpl().updateUsage1(appServerHash)
+                        EndpointUsage.Access().updateUsage1(appServerHash)
                         jsonObjectOf("result" to "sent to FCM.")
                     }
 
@@ -318,7 +329,7 @@ fun Application.module() {
         get("/l/{objectId}") {
             try {
                 call.parameters["objectId"]
-                    ?.let { LargeMessage.AccessImpl().find(it) }
+                    ?.let { LargeMessage.Access().find(it) }
                     ?.let {
                         call.respondBytes(
                             it.data,

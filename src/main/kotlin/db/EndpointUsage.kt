@@ -29,16 +29,8 @@ data class EndpointUsage(
         override val primaryKey = PrimaryKey(hashId)
     }
 
-    interface Access {
-        suspend fun updateUsage1(id: String)
-
-        suspend fun updateUsage(idSet: Set<String>)
-        suspend fun oldIds(): List<String>
-        suspend fun deleteIds(oldIds: List<String>): Int
-    }
-
-    class AccessImpl : Access {
-        override suspend fun updateUsage1(id: String) {
+    class Access {
+        suspend fun updateUsage1(id: String) {
             dbQuery {
                 val now = System.currentTimeMillis()
                 val affectedRows = Meta.update(
@@ -54,7 +46,7 @@ data class EndpointUsage(
             }
         }
 
-        override suspend fun updateUsage(idSet: Set<String>) {
+        suspend fun updateUsage(idSet: Set<String>) {
             val stepMax = 1000
             val idList = idSet.toList()
             val end = idSet.size
@@ -87,7 +79,7 @@ data class EndpointUsage(
             }
         }
 
-        override suspend fun oldIds(): List<String> =
+        suspend fun oldIds(): List<String> =
             dbQuery {
                 val expire = System.currentTimeMillis() - TimeUnit.DAYS.toMillis(30)
                 Meta.select { Meta.timeUsed less expire }
@@ -95,7 +87,7 @@ data class EndpointUsage(
                     .map { it[Meta.hashId] }
             }
 
-        override suspend fun deleteIds(oldIds: List<String>) = dbQuery {
+        suspend fun deleteIds(oldIds: List<String>) = dbQuery {
             Meta.deleteWhere { hashId.inList(oldIds) }
         }
     }
